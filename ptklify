@@ -1,0 +1,3 @@
+#! /bin/sh
+
+exec env LD_PRELOAD=$(realpath ./libptkl.so) ${@}
