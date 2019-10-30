@@ -110,6 +110,17 @@ remove_fd(const int fd) {
 	}
 }
 
+static
+int
+is_pts_fd(const int fd) {
+	for (int i = 0; i < LEN(ctx.fds); i++) {
+		if (fd == ctx.fds[i]) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
 int
 open(const char * name, int flags, ...) {
 	int ret = libc.open(name, flags);
@@ -179,15 +190,9 @@ ssize_t
 write(int fd, const void * buf, size_t count) {
 	ssize_t ret;
 	ret = libc.write(fd, buf, count);
-	for (int i = 0; i < LEN(ctx.fds); i++) {
-		if (ctx.fds[i] == fd) {
-			dprintf(LOG_FD, "%d: write: fd: %d: size: %d: ", getpid(), fd, ret);
-			if (ret > 0) {
-				libc.write(LOG_FD, buf, count);
-			}
-			libc.write(LOG_FD, "\n", 1);
-			break;
-		}
+	if (ret > 0 && is_pts_fd(fd)) {
+		dprintf(LOG_FD, "%d: write: fd: %d: size: %d: ", getpid(), fd, ret);
+		libc.writev(LOG_FD, (const struct iovec[]){{ buf, count }, { "\n", 1 }}, 2);
 	}
 	return ret;
 }
@@ -196,13 +201,10 @@ ssize_t
 writev(int fd, const struct iovec * iov, int iovcnt) {
 	ssize_t ret;
 	ret = libc.writev(fd, iov, iovcnt);
-	for (int i = 0; i < LEN(ctx.fds); i++) {
-		if (ctx.fds[i] == fd) {
-			dprintf(LOG_FD, "%d: writev: fd: %d: size: %d", getpid(), fd, ret);
-			libc.writev(LOG_FD, iov, iovcnt);
-			libc.write(LOG_FD, "\n", 1);
-			break;
-		}
+	if (ret > 0 && is_pts_fd(fd)) {
+		dprintf(LOG_FD, "%d: writev: fd: %d: size: %d", getpid(), fd, ret);
+		libc.writev(LOG_FD, iov, iovcnt);
+		libc.write(LOG_FD, "\n", 1);
 	}
 	return ret;
 }
