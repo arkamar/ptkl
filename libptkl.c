@@ -124,7 +124,7 @@ is_pts_fd(const int fd) {
 int
 open(const char * name, int flags, ...) {
 	int ret = libc.open(name, flags);
-	if (strstr(name, "/ptmx")) {
+	if (ret != -1 && strstr(name, "/ptmx")) {
 		dprintf(LOG_FD, "%d: open: %s\n", getpid(), name);
 		append_fd(ret);
 	}
@@ -134,7 +134,7 @@ open(const char * name, int flags, ...) {
 int
 openat(int dir, const char * name, int flags, ...) {
 	int ret = libc.openat(dir, name, flags);
-	if (strstr(name, "/ptmx")) {
+	if (ret != -1 && strstr(name, "/ptmx")) {
 		dprintf(LOG_FD, "%d: openat: %s\n", getpid(), name);
 		append_fd(ret);
 	}
@@ -154,8 +154,10 @@ close(int fd) {
 int
 getpt() {
 	int fd = libc.getpt();
-	dprintf(LOG_FD, "%d: getpt: master: %d\n", getpid(), fd);
-	append_fd(fd);
+	if (fd != -1) {
+		dprintf(LOG_FD, "%d: getpt: master: %d\n", getpid(), fd);
+		append_fd(fd);
+	}
 	return fd;
 }
 
@@ -163,8 +165,10 @@ int
 openpty(int * master, int * slave, char * name, const struct termios * termp, const struct winsize * winp) {
 	int ret;
 	ret = libc.openpty(master, slave, name, termp, winp);
-	dprintf(LOG_FD, "%d: openpty: master: %d slave: %d name: %s\n", getpid(), *master, *slave, name);
-	append_fd(*master);
+	if (ret != -1) {
+		dprintf(LOG_FD, "%d: openpty: master: %d slave: %d name: %s\n", getpid(), *master, *slave, name);
+		append_fd(*master);
+	}
 	return ret;
 }
 
@@ -172,8 +176,10 @@ pid_t
 forkpty(int * master, char * name, const struct termios * termp, const struct winsize * winp) {
 	pid_t ret;
 	ret = libc.forkpty(master, name, termp, winp);
-	dprintf(LOG_FD, "%d: forkpty: pid: %u master: %d name: %s\n", getpid(), ret, *master, name);
-	append_fd(*master);
+	if (ret != -1) {
+		dprintf(LOG_FD, "%d: forkpty: pid: %u master: %d name: %s\n", getpid(), ret, *master, name);
+		append_fd(*master);
+	}
 	return ret;
 }
 
@@ -181,8 +187,10 @@ int
 posix_openpt(int flags) {
 	int master;
 	master = libc.posix_openpt(flags);
-	dprintf(LOG_FD, "%d: posix_openpt: master: %d\n", getpid(), master);
-	append_fd(master);
+	if (master != -1) {
+		dprintf(LOG_FD, "%d: posix_openpt: master: %d\n", getpid(), master);
+		append_fd(master);
+	}
 	return master;
 }
 
