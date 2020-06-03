@@ -7,9 +7,21 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/uio.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #define LOG_FD 100
 #define LEN(x) ( sizeof (x) / sizeof * (x) )
+#define PRINTABLE(c) (c >= 0x20 && c <= 0x7e ? 1 : 0)
+
+static struct {
+	char *host;
+	int port, sock;
+	struct sockaddr_in saddr;
+} logger;
+
+int init_logger (const char *dest, const int port);
 
 static struct {
 	int (*open)(const char *, int);
@@ -23,6 +35,8 @@ static struct {
 	ssize_t (*write)(int, const void *, size_t);
 	ssize_t (*writev)(int, const struct iovec *, int);
 
+	pid_t (*fork)(void);
+
 	int (*posix_openpt)(int);
 } libc;
 
@@ -33,6 +47,26 @@ static struct {
 static
 void __attribute__((constructor))
 init() {
+	char *remote_logger = getenv("REMOTE_LOGGER");
+
+	if (remote_logger != NULL) {
+		char *ptr;
+
+		logger.host = ptr = remote_logger;
+		while (*ptr != ':')
+			ptr++;
+		*ptr = '\0';
+		logger.port = atoi(++ptr);
+		if(logger.port > 0) {
+			dprintf(LOG_FD, "%d: host: %s port: %d\n", getpid(), logger.host, logger.port);
+			if (init_logger(logger.host, logger.port) == -1) {
+				dprintf(LOG_FD, "Error initializing remote logger\n");
+				abort();
+			}
+		}
+	} else
+		logger.sock = -1;
+
 	libc.open = dlsym(RTLD_NEXT, "open");
 	if (!libc.open) {
 		dprintf(LOG_FD, "Error in dlsym: %s\n", dlerror());
@@ -73,6 +107,11 @@ init() {
 		dprintf(LOG_FD, "Error in dlsym: %s\n", dlerror());
 	}
 
+	libc.fork = dlsym(RTLD_NEXT, "fork");
+	if (!libc.fork) {
+		dprintf(LOG_FD, "Error in dlsym: %s\n", dlerror());
+	}
+
 	libc.posix_openpt = dlsym(RTLD_NEXT, "posix_openpt");
 	if (!libc.posix_openpt) {
 		dprintf(LOG_FD, "Error in dlsym: %s\n", dlerror());
@@ -81,12 +120,14 @@ init() {
 	for (int i = 0; i < LEN(ctx.fds); i++) {
 		ctx.fds[i] = -1;
 	}
-
 }
 
 static
 void __attribute__((destructor))
 fini() {
+	for (int i = 0; i < LEN(ctx.fds); i++)
+		if ( ctx.fds[i] != -1 )
+			libc.close(ctx.fds[i]);
 }
 
 static
@@ -119,6 +160,24 @@ is_pts_fd(const int fd) {
 		}
 	}
 	return 0;
+}
+
+int
+init_logger (const char *dest, const int port) {
+	logger.sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+	if (logger.sock == -1) {
+		dprintf(LOG_FD, "Error creating socket\n");
+		return -1;
+	}
+
+	dup2(logger.sock, LOG_FD);
+
+	memset(&logger.saddr, 0, sizeof(struct sockaddr_in));
+	inet_aton(dest, &logger.saddr.sin_addr);
+	logger.saddr.sin_port = htons(port);
+	logger.saddr.sin_family = AF_INET;
+
+	return connect(logger.sock, (const struct sockaddr *)&logger.saddr, sizeof(logger.saddr));
 }
 
 int
@@ -192,7 +251,17 @@ write(int fd, const void * buf, size_t count) {
 	ret = libc.write(fd, buf, count);
 	if (ret > 0 && is_pts_fd(fd)) {
 		dprintf(LOG_FD, "%d: write: fd: %d: size: %d: ", getpid(), fd, ret);
-		libc.writev(LOG_FD, (const struct iovec[]){{ buf, count }, { "\n", 1 }}, 2);
+		int i = 0;
+		do {
+			char c = *((char *)buf + i++);
+			char p[5] = {0,0,0,0,0};
+
+			if (PRINTABLE(c)) p[0] = c;
+				else sprintf(p, "0x%02x", c);
+
+			libc.writev(LOG_FD, (const struct iovec[]){{ p, 5 }}, 1);
+		}while(i < count);
+		dprintf(LOG_FD, "\n");
 	}
 	return ret;
 }
@@ -205,6 +274,16 @@ writev(int fd, const struct iovec * iov, int iovcnt) {
 		dprintf(LOG_FD, "%d: writev: fd: %d: size: %d", getpid(), fd, ret);
 		libc.writev(LOG_FD, iov, iovcnt);
 		libc.write(LOG_FD, "\n", 1);
+	}
+	return ret;
+}
+
+pid_t
+fork(void) {
+	pid_t ret;
+	ret = libc.fork();
+	if (ret > 0) { // parent
+		dprintf(LOG_FD, "%d: fork: ret: %d\n", getpid(), ret);
 	}
 	return ret;
 }
